@@ -12,6 +12,7 @@ Similarity is cosine similarity (1 - cosine distance), in [-1, 1].
 """
 
 import uuid
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Any
@@ -26,6 +27,47 @@ from .schema import lesson_chunk
 # bag-of-words vectors (mock) score far lower than a trained model for the same pair of texts.
 DEFAULT_MIN_SIMILARITY = {"mock": 0.10, "ollama": 0.45}
 FALLBACK_MIN_SIMILARITY = 0.50
+
+# In-memory LRU cache for query embeddings: (normalized_query, model) -> vector
+_QUERY_EMBED_CACHE: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+_DEFAULT_MAX_CACHE_ENTRIES = 2000
+
+
+def clear_query_cache() -> None:
+    """Clear query embedding cache (useful for testing and memory resets)."""
+    _QUERY_EMBED_CACHE.clear()
+
+
+def get_query_cache_stats() -> dict[str, int]:
+    """Return cache statistics."""
+    return {"size": len(_QUERY_EMBED_CACHE)}
+
+
+async def get_query_embedding(
+    provider: ModelProvider,
+    query: str,
+    *,
+    max_entries: int = _DEFAULT_MAX_CACHE_ENTRIES,
+) -> list[float]:
+    """Retrieve embedding vector for query from LRU cache or compute it via provider."""
+    normalized = " ".join(query.strip().lower().split())
+    if not normalized:
+        return []
+    key = (normalized, provider.embedding_model)
+    if key in _QUERY_EMBED_CACHE:
+        _QUERY_EMBED_CACHE.move_to_end(key)
+        return _QUERY_EMBED_CACHE[key]
+
+    vectors = await provider.embed([query], kind="query")
+    if not vectors:
+        return []
+    vector = vectors[0]
+
+    if max_entries > 0:
+        if len(_QUERY_EMBED_CACHE) >= max_entries:
+            _QUERY_EMBED_CACHE.popitem(last=False)
+        _QUERY_EMBED_CACHE[key] = vector
+    return vector
 
 
 @dataclass(frozen=True)
@@ -153,25 +195,32 @@ async def pin_context(
     budget_tokens: int,
     related_k: int,
     minimum: float,
+    max_cache_entries: int = _DEFAULT_MAX_CACHE_ENTRIES,
 ) -> list[Passage]:
     """Choose the passages for a new chat. Empty if the lesson isn't indexed (for this embedding model)."""
     model = provider.embedding_model
-    vector = (await provider.embed([query], kind="query"))[0] if query and query.strip() else None  # before any I/O
+    has_query = bool(query and query.strip())
+    vector: list[float] | None = None
     async with engine.connect() as conn:
         lesson = await lesson_passages(conn, lesson_id, model)
         if not lesson:
             return []
-        if sum(p.token_count for p in lesson) <= budget_tokens:
+        total_lesson_tokens = sum(p.token_count for p in lesson)
+        if total_lesson_tokens <= budget_tokens:
             chosen = lesson
-        elif vector is None:
-            chosen = _fill(lesson, budget_tokens)
         else:
-            scored = await passages_by_id(conn, [p.chunk_id for p in lesson], model, vector)
-            best_first = sorted(scored, key=lambda p: (-(p.similarity or 0.0), p.position))
-            chosen = sorted(_fill(best_first, budget_tokens), key=lambda p: p.position)
+            if has_query:
+                vector = await get_query_embedding(provider, query, max_entries=max_cache_entries)
+                scored = await passages_by_id(conn, [p.chunk_id for p in lesson], model, vector)
+                best_first = sorted(scored, key=lambda p: (-(p.similarity or 0.0), p.position))
+                chosen = sorted(_fill(best_first, budget_tokens), key=lambda p: p.position)
+            else:
+                chosen = _fill(lesson, budget_tokens)
         remaining = budget_tokens - sum(p.token_count for p in chosen)
         related: list[Passage] = []
-        if vector is not None and related_k > 0 and remaining > 0:
+        if related_k > 0 and remaining > 0 and has_query:
+            if vector is None:
+                vector = await get_query_embedding(provider, query, max_entries=max_cache_entries)
             found = await search(
                 conn, vector, course_id=course_id, model=model, k=related_k, minimum=minimum, exclude_lesson=lesson_id
             )

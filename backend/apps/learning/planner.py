@@ -7,29 +7,35 @@ from django.utils import timezone
 
 from apps.assessment.models import Answer
 from apps.catalogue.models import Lesson, PublishStatus
-
 from .access import entitled_course_ids
 from .models import LessonProgress, MasteryState
 
 
-def accessible_lessons(student):
+def accessible_lessons(student, course_ids=None):
     """Lessons in entitled courses, in course order (school chapter order within a course)."""
+    if course_ids is None:
+        course_ids = entitled_course_ids(student)
+
     return (
         Lesson.objects.filter(
-            module__course_id__in=entitled_course_ids(student), module__course__status=PublishStatus.PUBLISHED
+            module__course_id__in=course_ids,
+            module__course__status=PublishStatus.PUBLISHED,
         )
         .select_related("module__course")
         .order_by("module__course__title", "module__position", "position")
     )
 
 
-def next_lesson(student):
+def next_lesson(student, course_ids=None):
     """The first accessible lesson the student hasn't finished. Filtered in the database, one row fetched."""
-    finished = LessonProgress.objects.filter(student=student, status=LessonProgress.Status.FINISHED).values("lesson_id")
-    return accessible_lessons(student).exclude(id__in=finished).first()
+    finished = LessonProgress.objects.filter(
+        student=student, status=LessonProgress.Status.FINISHED
+    ).values("lesson_id")
+
+    return accessible_lessons(student, course_ids=course_ids).exclude(id__in=finished).first()
 
 
-def review_item(student):
+def review_item(student, course_ids=None):
     """The weakest practised skill, and a lesson that teaches it."""
     weakest = (
         MasteryState.objects.filter(student=student, evidence_count__gt=0)
@@ -40,7 +46,11 @@ def review_item(student):
     )
     if not weakest:
         return None
-    lesson = accessible_lessons(student).filter(skill_links__skill=weakest.skill).first()
+
+    lesson = accessible_lessons(student, course_ids=course_ids).filter(
+        skill_links__skill=weakest.skill
+    ).first()
+
     return {"skill": weakest.skill, "state": weakest, "lesson": lesson}
 
 

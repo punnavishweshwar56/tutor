@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     ollama_chat_model: str = Field("llama3.2", alias="TUTOR_OLLAMA_CHAT_MODEL", min_length=1)
     ollama_embed_model: str = Field("nomic-embed-text", alias="TUTOR_OLLAMA_EMBED_MODEL", min_length=1)
     ollama_keep_alive: str = Field("30m", alias="TUTOR_OLLAMA_KEEP_ALIVE")
+    ollama_max_batch_size: int = Field(32, alias="TUTOR_OLLAMA_MAX_BATCH_SIZE", ge=1, le=64)
     ollama_timeout_seconds: float = Field(180.0, alias="TUTOR_OLLAMA_TIMEOUT_SECONDS", gt=0, le=900)
     # Gemini chat configuration
     gemini_api_key: SecretStr | None = Field(
@@ -41,6 +42,11 @@ class Settings(BaseSettings):
         alias="TUTOR_GEMINI_CHAT_MODEL",
         min_length=1,
     )
+    ollama_max_batch_size: int = Field(32, alias="TUTOR_OLLAMA_MAX_BATCH_SIZE", ge=1, le=64)
+    ollama_connect_timeout: float = Field(15.0, alias="TUTOR_OLLAMA_CONNECT_TIMEOUT", gt=0, le=300)
+    query_cache_max_entries: int = Field(2000, alias="TUTOR_AI_QUERY_CACHE_MAX_ENTRIES", ge=0, le=50_000)
+    db_pool_size: int = Field(10, alias="TUTOR_AI_DB_POOL_SIZE", ge=1, le=100)
+    db_max_overflow: int = Field(15, alias="TUTOR_AI_DB_MAX_OVERFLOW", ge=0, le=100)
 
     # Tutor prompts and size limits (design §6). Locally they suit a 3B model on a CPU; the hosted provider gets
     # larger limits once it is chosen (D23).

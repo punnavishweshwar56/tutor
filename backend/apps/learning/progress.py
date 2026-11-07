@@ -1,3 +1,4 @@
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 
 from apps.catalogue.models import Lesson, Skill
@@ -23,25 +24,44 @@ def check_course_completion(student, course) -> bool:
     """C4: every lesson finished AND every skill the course teaches at least 'developing'."""
     if CourseCompletion.objects.filter(student=student, course=course).exists():
         return True
-    lesson_ids = set(Lesson.objects.filter(module__course=course).values_list("id", flat=True))
-    finished = set(
-        LessonProgress.objects.filter(student=student, lesson_id__in=lesson_ids, status="finished").values_list(
-            "lesson_id", flat=True
-        )
-    )
-    if not lesson_ids or finished != lesson_ids:
+
+    lessons = Lesson.objects.filter(module__course=course)
+    if not lessons.exists():
         return False
-    skill_ids = set(
-        Skill.objects.filter(lesson_links__lesson__module__course=course, lesson_links__role="teaches").values_list(
-            "id", flat=True
+
+    unfinished = lessons.annotate(
+        is_finished=Exists(
+            LessonProgress.objects.filter(
+                student=student,
+                lesson_id=OuterRef("pk"),
+                status=LessonProgress.Status.FINISHED,
+            )
         )
-    )
-    good = set(
-        MasteryState.objects.filter(student=student, skill_id__in=skill_ids, level__in=DONE_LEVELS).values_list(
-            "skill_id", flat=True
-        )
-    )
-    if good != skill_ids:
+    ).filter(is_finished=False)
+
+    if unfinished.exists():
         return False
+
+    missing_mastery = (
+        Skill.objects.filter(
+            lesson_links__lesson__module__course=course,
+            lesson_links__role="teaches",
+        )
+        .distinct()
+        .annotate(
+            has_good_mastery=Exists(
+                MasteryState.objects.filter(
+                    student=student,
+                    skill_id=OuterRef("pk"),
+                    level__in=DONE_LEVELS,
+                )
+            )
+        )
+        .filter(has_good_mastery=False)
+    )
+
+    if missing_mastery.exists():
+        return False
+
     CourseCompletion.objects.get_or_create(student=student, course=course)
     return True

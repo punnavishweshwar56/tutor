@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 logger = logging.getLogger("tutor_ai.db")
 
 
-def create_engine(url: str) -> AsyncEngine:
+def create_engine(url: str, *, pool_size: int = 10, max_overflow: int = 15) -> AsyncEngine:
     return create_async_engine(
         url,
-        pool_size=5,
-        max_overflow=5,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
         pool_pre_ping=True,  # Neon suspends idle computes; a dead pooled connection is replaced, not used
         pool_recycle=300,
     )

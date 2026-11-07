@@ -13,7 +13,7 @@ from apps.content.services import published_version
 from apps.core.errors import ApiError
 
 from . import planner, progress
-from .access import require_active_student, require_lesson_access
+from .access import entitled_course_ids, require_active_student, require_lesson_access
 from .models import CourseCompletion, LessonProgress, MasteryState
 from .schemas import FinishOut, LessonOut, RecordOut, TodayOut
 
@@ -63,8 +63,10 @@ def finish_lesson(request, lesson_id: UUID):
 @student_router.get("/today", response=TodayOut)
 def today(request):
     require_active_student(request.user)
-    nxt = planner.next_lesson(request.user)
-    review = planner.review_item(request.user)
+
+    course_ids = entitled_course_ids(request.user)
+    nxt = planner.next_lesson(request.user, course_ids=course_ids)
+    review = planner.review_item(request.user, course_ids=course_ids)
     return {
         "next_lesson": {"id": nxt.id, "title": nxt.title, "course_title": nxt.module.course.title} if nxt else None,
         "review": {

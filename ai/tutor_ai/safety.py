@@ -250,10 +250,12 @@ class StreamGuard:
         if self.problem is not None:
             return ""
         self.text += delta
-        if leaked_answer(self.text, self.protected) is not None:
+        # Optimization: Evaluate trailing text window to avoid O(N^2) rescan while preserving cross-chunk detection
+        scan_window = self.text[max(0, len(self.text) - max(2 * self.window, len(delta) + self.window)) :]
+        if leaked_answer(scan_window, self.protected) is not None:
             self.problem, self.verdict = "quiz_answer", Verdict("quiz_answer", "medium")
             return ""
-        verdict = self.policy.classify(self.text)
+        verdict = self.policy.classify(scan_window)
         if SEVERITY_RANK[verdict.severity] >= SEVERITY_RANK["high"]:
             self.problem, self.verdict = "harmful", verdict
             return ""

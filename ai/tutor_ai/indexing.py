@@ -237,6 +237,7 @@ async def index_lesson(engine: AsyncEngine, provider: ModelProvider, doc: Lesson
         )
 
     try:
+        # Optimized batch embedding: compute all passage vectors in parallel before DB transaction
         vectors = await provider.embed([c.embed_text for c in chunks], kind="document")
         _check_vectors(vectors, len(chunks), provider)
     except ProviderError as exc:

@@ -27,6 +27,8 @@ def build_provider(settings: Settings) -> ModelProvider:
             dimensions=settings.embedding_dimensions,
             keep_alive=settings.ollama_keep_alive,
             timeout_seconds=settings.ollama_timeout_seconds,
+            connect_timeout=settings.ollama_connect_timeout,
+            max_batch_size=settings.ollama_max_batch_size,
         )
 
     if settings.provider == "gemini":

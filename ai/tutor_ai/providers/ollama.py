@@ -28,6 +28,9 @@ NOMIC_PREFIX = {
     "query": "search_query: ",
 }
 
+# nomic-embed-text was trained with these prefixes; without them retrieval quality drops.
+NOMIC_PREFIX = {"document": "search_document: ", "query": "search_query: "}
+DEFAULT_EMBED_BATCH = 32
 MAX_EMBED_BATCH = 32
 
 
@@ -44,20 +47,19 @@ class OllamaProvider:
         embedding_model: str,
         dimensions: int,
         keep_alive: str = "30m",
+        max_batch_size: int = DEFAULT_EMBED_BATCH,
         timeout_seconds: float = 180.0,
+        connect_timeout: float = 15.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.chat_model = chat_model
         self.embedding_model = embedding_model
         self.dimensions = dimensions
         self.keep_alive = keep_alive
-
+        self.max_batch_size = max(1, min(max_batch_size, 64))
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
-            timeout=httpx.Timeout(
-                timeout_seconds,
-                connect=5.0,
-            ),
+            timeout=httpx.Timeout(timeout_seconds, connect=connect_timeout),
             transport=transport,
         )
 
@@ -174,19 +176,8 @@ class OllamaProvider:
         )
 
         vectors: list[list[float]] = []
-
-        for start in range(
-            0,
-            len(texts),
-            MAX_EMBED_BATCH,
-        ):
-            batch = [
-                prefix + text
-                for text in texts[
-                    start : start + MAX_EMBED_BATCH
-                ]
-            ]
-
+        for start in range(0, len(texts), self.max_batch_size):
+            batch = [prefix + t for t in texts[start : start + self.max_batch_size]]
             try:
                 response = await self._client.post(
                     "/api/embed",

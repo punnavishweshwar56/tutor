@@ -5,6 +5,19 @@ Settings are read when the app is created, so importing this module never needs 
 """
 
 import logging
+import sys
+
+if sys.platform == "win32":
+    import asyncio
+    import warnings
+
+    if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            try:
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            except Exception:
+                pass
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -34,7 +47,11 @@ def create_app(settings: Settings | None = None, provider: ModelProvider | None 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings
-        app.state.engine = create_engine(settings.database_url.get_secret_value())
+        app.state.engine = create_engine(
+            settings.database_url.get_secret_value(),
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_max_overflow,
+        )
         app.state.provider = provider or build_provider(settings)
         app.state.prompts = prompts
         app.state.safety = safety

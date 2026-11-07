@@ -41,6 +41,27 @@ logger = logging.getLogger("tutor_ai.tutor")
 TEMPERATURE = 0.3
 _CITATION = re.compile(r"\[(P\d+)\]")
 
+_CONVERSATIONAL_PHRASES = frozenset({
+    "yes", "yeah", "yep", "no", "nope", "ok", "okay", "sure", "thanks", "thank you",
+    "continue", "go on", "tell me more", "explain more", "give an example", "what next",
+    "i understand", "i got it", "i see", "makes sense", "understood", "got it", "please continue",
+    "next", "more", "cool", "alright", "all right", "great", "yes please", "no thanks"
+})
+
+
+def is_conversational_continuation(text: str) -> bool:
+    cleaned = re.sub(r"[^\w\s]", "", text.strip().lower())
+    words = cleaned.split()
+    if not words:
+        return False
+    if cleaned in _CONVERSATIONAL_PHRASES:
+        return True
+    if len(words) <= 3 and " ".join(words) in _CONVERSATIONAL_PHRASES:
+        return True
+    if len(words) <= 2 and all(w in _CONVERSATIONAL_PHRASES or w in {"please", "so", "and"} for w in words):
+        return True
+    return False
+
 Event = tuple[str, dict[str, Any]]
 
 
@@ -189,13 +210,20 @@ class TutorService:
                 budget_tokens=budget,
                 related_k=self.settings.retrieval_top_k,
                 minimum=self.minimum,
+                max_cache_entries=self.settings.query_cache_max_entries,
             )
             if not fresh:
                 return None
             return _Context(fresh, [p.chunk_id for p in fresh], repinned=bool(request.pinned_chunk_ids))
 
         context = _Context(pinned, [p.chunk_id for p in pinned])
-        vector = (await self.provider.embed([message], kind="query"))[0]
+        if is_conversational_continuation(message):
+            context.similarity = 1.0
+            return context
+
+        vector = await retrieval.get_query_embedding(
+            self.provider, message, max_entries=self.settings.query_cache_max_entries
+        )
         async with self.engine.connect() as conn:
             context.similarity = await retrieval.best_similarity(conn, context.pinned_ids, vector, model)
             if context.similarity is not None and context.similarity >= self.minimum:

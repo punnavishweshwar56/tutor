@@ -1,6 +1,6 @@
 # Development and CI tools for the AI service (exact pins, same as backend where shared)
-ruff==0.16.10
-coverage==7.16.2
+ruff==0.17.3
+coverage==7.17.0
 pip-audit==2.10.1
-pytest==9.1.1
-mypy==2.4.0
+pytest==9.2.0
+mypy==2.4.1
